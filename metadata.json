@@ -1,0 +1,6 @@
+{
+  "name": "AndrewsPlan",
+  "description": "Android-ready AndrewsPlan schedule viewer with Basic Auth login, scrollable agenda list, and 15-minute auto-sync with manual refresh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

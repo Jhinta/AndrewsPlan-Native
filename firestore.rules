@@ -1,0 +1,234 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+        'userId',
+        'cloudplanUsername',
+        'calendarName',
+        'lastSyncedAt',
+        'eventCount',
+        'theme',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'userId',
+        'cloudplanUsername',
+        'calendarName',
+        'lastSyncedAt',
+        'eventCount',
+        'theme',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.userId is string
+      && data.userId == userId
+      && isValidId(data.userId)
+      && data.cloudplanUsername is string
+      && data.cloudplanUsername.size() >= 1
+      && data.cloudplanUsername.size() <= 160
+      && data.calendarName is string
+      && data.calendarName.size() >= 1
+      && data.calendarName.size() <= 160
+      && data.lastSyncedAt is string
+      && data.lastSyncedAt.size() >= 10
+      && data.lastSyncedAt.size() <= 64
+      && data.eventCount is int
+      && data.eventCount >= 0
+      && data.eventCount <= 10000
+      && data.theme in ['light', 'dark']
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidSyncedEvent(data, userId, eventId) {
+      return data.keys().hasAll([
+        'userId',
+        'eventId',
+        'uid',
+        'summary',
+        'description',
+        'location',
+        'start',
+        'end',
+        'allDay',
+        'isRecurring',
+        'status',
+        'organizer',
+        'url',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'userId',
+        'eventId',
+        'uid',
+        'summary',
+        'description',
+        'location',
+        'start',
+        'end',
+        'allDay',
+        'isRecurring',
+        'status',
+        'organizer',
+        'url',
+        'createdAt',
+        'updatedAt'
+      ])
+      && data.userId is string
+      && data.userId == userId
+      && isValidId(data.userId)
+      && data.eventId is string
+      && data.eventId == eventId
+      && isValidId(data.eventId)
+      && data.uid is string
+      && data.uid.size() >= 1
+      && data.uid.size() <= 256
+      && data.summary is string
+      && data.summary.size() >= 1
+      && data.summary.size() <= 300
+      && data.description is string
+      && data.description.size() <= 4000
+      && data.location is string
+      && data.location.size() <= 400
+      && data.start is string
+      && data.start.size() >= 10
+      && data.start.size() <= 64
+      && data.end is string
+      && data.end.size() >= 10
+      && data.end.size() <= 64
+      && data.allDay is bool
+      && data.isRecurring is bool
+      && data.status is string
+      && data.status.size() <= 64
+      && data.organizer is string
+      && data.organizer.size() <= 240
+      && data.url is string
+      && data.url.size() <= 512
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'cloudplanUsername',
+            'calendarName',
+            'lastSyncedAt',
+            'eventCount',
+            'updatedAt'
+          ])
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'theme',
+            'updatedAt'
+          ])
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'cloudplanUsername',
+            'calendarName',
+            'lastSyncedAt',
+            'eventCount',
+            'theme',
+            'updatedAt'
+          ])
+        );
+
+      allow delete: if isValidId(userId) && isOwner(userId);
+
+      match /events/{eventId} {
+        allow get: if isValidId(userId)
+          && isValidId(eventId)
+          && isOwner(userId);
+
+        allow list: if isOwner(userId)
+          && resource.data.userId == request.auth.uid;
+
+        allow create: if isValidId(userId)
+          && isValidId(eventId)
+          && isOwner(userId)
+          && isValidSyncedEvent(incoming(), userId, eventId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (
+            exists(/databases/$(database)/documents/users/$(userId))
+            || existsAfter(/databases/$(database)/documents/users/$(userId))
+          );
+
+        allow update: if isValidId(userId)
+          && isValidId(eventId)
+          && isOwner(userId)
+          && isValidSyncedEvent(incoming(), userId, eventId)
+          && incoming().userId == existing().userId
+          && incoming().eventId == existing().eventId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'uid',
+            'summary',
+            'description',
+            'location',
+            'start',
+            'end',
+            'allDay',
+            'isRecurring',
+            'status',
+            'organizer',
+            'url',
+            'updatedAt'
+          ]);
+
+        allow delete: if isValidId(userId)
+          && isValidId(eventId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AndrewsPlan</string>
+    <string name="title_activity_main">AndrewsPlan</string>
+    <string name="package_name">nl.cloudplan.agenda</string>
+    <string name="custom_url_scheme">nl.cloudplan.agenda</string>
+</resources>
