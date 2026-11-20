@@ -138,9 +138,13 @@ export default function App() {
 
   const [mapProvider, setMapProvider] = useState<EventMapProvider>(() => {
     try {
-      return localStorage.getItem(MAP_PROVIDER_STORAGE_KEY) === 'osm' ? 'osm' : 'google';
+      const stored = localStorage.getItem(MAP_PROVIDER_STORAGE_KEY);
+      if (stored === 'google') {
+        localStorage.setItem(MAP_PROVIDER_STORAGE_KEY, 'osm');
+      }
+      return 'osm';
     } catch {
-      return 'google';
+      return 'osm';
     }
   });
 
@@ -1011,8 +1015,8 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl">
                   {(
                     [
-                      { id: 'google', label: 'Google Maps' },
                       { id: 'osm', label: 'OpenStreetMap' },
+                      { id: 'google', label: 'Google Maps' },
                     ] as const
                   ).map((opt) => (
                     <button

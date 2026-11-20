@@ -110,7 +110,7 @@ export const EventLocationMap: React.FC<EventLocationMapProps> = ({
   onChangeMapProvider,
   onRequestNavigate,
 }) => {
-  const [internalProvider, setInternalProvider] = useState<EventMapProvider>('google');
+  const [internalProvider, setInternalProvider] = useState<EventMapProvider>('osm');
   const activeProvider = mapProvider ?? internalProvider;
   const setProvider = (next: EventMapProvider) => {
     setInternalProvider(next);
@@ -176,29 +176,59 @@ export const EventLocationMap: React.FC<EventLocationMapProps> = ({
         }
 
         try {
-          const res = await fetch(
-            resolveApiUrl(`/api/maps/osm-geocode?address=${encodeURIComponent(trimmed)}`)
-          );
-          const payload = (await res.json().catch(() => ({}))) as {
-            lat?: number;
-            lng?: number;
-            formattedAddress?: string;
-            error?: string;
-          };
+          let lat: number | undefined;
+          let lng: number | undefined;
+          let formattedAddress: string | undefined;
+
+          // 1. Direct Nominatim geocode (works in native app without backend proxy)
+          try {
+            const nomRes = await fetch(
+              `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(trimmed)}`,
+              { headers: { 'User-Agent': 'AndrewsPlan/1.0' } }
+            );
+            if (nomRes.ok) {
+              const nomData = await nomRes.json();
+              if (Array.isArray(nomData) && nomData.length > 0 && nomData[0].lat && nomData[0].lon) {
+                lat = parseFloat(nomData[0].lat);
+                lng = parseFloat(nomData[0].lon);
+                formattedAddress = nomData[0].display_name;
+              }
+            }
+          } catch {
+            // Fallback to proxy
+          }
+
+          // 2. Fallback to proxy if direct Nominatim failed
+          if (lat === undefined || lng === undefined) {
+            const res = await fetch(
+              resolveApiUrl(`/api/maps/osm-geocode?address=${encodeURIComponent(trimmed)}`)
+            );
+            const payload = (await res.json().catch(() => ({}))) as {
+              lat?: number;
+              lng?: number;
+              formattedAddress?: string;
+              error?: string;
+            };
+            if (res.ok && typeof payload.lat === 'number' && typeof payload.lng === 'number') {
+              lat = payload.lat;
+              lng = payload.lng;
+              formattedAddress = payload.formattedAddress;
+            }
+          }
 
           if (cancelled) return;
 
-          if (!res.ok || typeof payload.lat !== 'number' || typeof payload.lng !== 'number') {
-            setErrorMessage(payload.error || 'Unable to pinpoint address on OpenStreetMap.');
+          if (lat === undefined || lng === undefined) {
+            setErrorMessage('Unable to pinpoint address on OpenStreetMap.');
             setCoords(null);
             setIsLoading(false);
             return;
           }
 
           const resolvedPoint: GeocodedPoint = {
-            lat: payload.lat,
-            lng: payload.lng,
-            formattedAddress: payload.formattedAddress || trimmed,
+            lat,
+            lng,
+            formattedAddress: formattedAddress || trimmed,
           };
           SESSION_GEOCODE_CACHE[cacheKey] = resolvedPoint;
           setCoords(resolvedPoint);
@@ -233,7 +263,7 @@ export const EventLocationMap: React.FC<EventLocationMapProps> = ({
       setApiKey(resolvedKey);
 
       if (!resolvedKey) {
-        setErrorMessage('Google Maps is currently unavailable.');
+        setErrorMessage('Google Maps API key is not configured. Switch to OpenStreetMap to view this address.');
         setIsLoading(false);
         return;
       }
@@ -245,48 +275,76 @@ export const EventLocationMap: React.FC<EventLocationMapProps> = ({
       }
 
       try {
-        const res = await fetch(
-          resolveApiUrl(`/api/maps/geocode?address=${encodeURIComponent(trimmed)}`)
-        );
-        const payload = (await res.json().catch(() => ({}))) as {
-          lat?: number;
-          lng?: number;
-          formattedAddress?: string;
-          status?: string;
-          error?: string | { status?: string; message?: string };
-        };
+        let lat: number | undefined;
+        let lng: number | undefined;
+        let formattedAddress: string | undefined;
+
+        // Try proxy geocode endpoint first
+        try {
+          const res = await fetch(
+            resolveApiUrl(`/api/maps/geocode?address=${encodeURIComponent(trimmed)}`)
+          );
+          const payload = (await res.json().catch(() => ({}))) as {
+            lat?: number;
+            lng?: number;
+            formattedAddress?: string;
+            status?: string;
+            error?: string | { status?: string; message?: string };
+          };
+
+          if (
+            res.status === 429 ||
+            (typeof payload.error === 'object' && payload.error?.status === 'RESOURCE_EXHAUSTED') ||
+            payload.status === 'OVER_QUERY_LIMIT'
+          ) {
+            window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+            setErrorMessage('Google Maps quota reached. Switch to OpenStreetMap or Navigate.');
+            setIsLoading(false);
+            return;
+          }
+
+          if (res.ok && typeof payload.lat === 'number' && typeof payload.lng === 'number') {
+            lat = payload.lat;
+            lng = payload.lng;
+            formattedAddress = payload.formattedAddress;
+          }
+        } catch {
+          // Proxy endpoint unavailable
+        }
+
+        // Fallback: use Nominatim to find coordinates so Google Maps can render the marker
+        if (lat === undefined || lng === undefined) {
+          try {
+            const nomRes = await fetch(
+              `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(trimmed)}`,
+              { headers: { 'User-Agent': 'AndrewsPlan/1.0' } }
+            );
+            if (nomRes.ok) {
+              const nomData = await nomRes.json();
+              if (Array.isArray(nomData) && nomData.length > 0 && nomData[0].lat && nomData[0].lon) {
+                lat = parseFloat(nomData[0].lat);
+                lng = parseFloat(nomData[0].lon);
+                formattedAddress = nomData[0].display_name;
+              }
+            }
+          } catch {
+            // Geocoding failed
+          }
+        }
 
         if (cancelled) return;
 
-        const payloadErrorStatus =
-          typeof payload.error === 'object' && payload.error ? payload.error.status : undefined;
-
-        if (
-          res.status === 429 ||
-          payloadErrorStatus === 'RESOURCE_EXHAUSTED' ||
-          payload.status === 'OVER_QUERY_LIMIT'
-        ) {
-          window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-          setErrorMessage('Google Maps quota reached. Switch to OpenStreetMap or Navigate.');
-          setIsLoading(false);
-          return;
-        }
-
-        if (!res.ok || typeof payload.lat !== 'number' || typeof payload.lng !== 'number') {
-          const msg =
-            typeof payload.error === 'string'
-              ? payload.error
-              : payload.error?.message || 'Unable to pinpoint address on map.';
-          setErrorMessage(msg);
+        if (lat === undefined || lng === undefined) {
+          setErrorMessage('Unable to pinpoint address on map.');
           setCoords(null);
           setIsLoading(false);
           return;
         }
 
         const resolvedPoint: GeocodedPoint = {
-          lat: payload.lat,
-          lng: payload.lng,
-          formattedAddress: payload.formattedAddress || trimmed,
+          lat,
+          lng,
+          formattedAddress: formattedAddress || trimmed,
         };
         SESSION_GEOCODE_CACHE[cacheKey] = resolvedPoint;
         setCoords(resolvedPoint);
@@ -312,13 +370,24 @@ export const EventLocationMap: React.FC<EventLocationMapProps> = ({
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 overflow-hidden">
-      <div className="px-3 py-2 border-b border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200">
-          <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-          <span>{activeProvider === 'osm' ? 'OpenStreetMap' : 'Google Maps'}</span>
+      <div className="px-3 py-2 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 min-w-0 shrink-0">
+          <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+          <span className="truncate">{activeProvider === 'osm' ? 'OpenStreetMap' : 'Google Maps'}</span>
         </div>
 
-        <div className="flex items-center gap-1 bg-slate-200/70 dark:bg-slate-800 p-0.5 rounded-lg text-[11px] font-medium">
+        <div className="flex items-center gap-1 bg-slate-200/70 dark:bg-slate-800 p-0.5 rounded-lg text-[11px] font-medium shrink-0">
+          <button
+            type="button"
+            onClick={() => setProvider('osm')}
+            className={`px-2 py-1 rounded-md transition-colors ${
+              activeProvider === 'osm'
+                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            OSM
+          </button>
           {(
             [
               { id: 'satellite', label: 'Satellite' },
@@ -342,17 +411,6 @@ export const EventLocationMap: React.FC<EventLocationMapProps> = ({
               {mode.label}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => setProvider('osm')}
-            className={`px-2 py-1 rounded-md transition-colors ${
-              activeProvider === 'osm'
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            OSM
-          </button>
         </div>
       </div>
 
