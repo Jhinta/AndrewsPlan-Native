@@ -80,24 +80,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             Connect to your AndrewsPlan schedule, Google Calendar, or both in one scrollable agenda. Syncs automatically every 15 minutes with manual refresh anytime.
           </p>
 
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 max-w-md">
-            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4">
-              <dt className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                Calendars
-              </dt>
-              <dd className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
-                AndrewsPlan & Google
-              </dd>
-            </div>
-            <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4">
-              <dt className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                Sync Cadence
-              </dt>
-              <dd className="mt-1 text-sm font-mono font-medium text-slate-900 dark:text-slate-100">
-                Every 15 min · Manual
-              </dd>
-            </div>
-          </dl>
 
           <div className="pt-1">
             <PWAInstallButton variant="compact" />
