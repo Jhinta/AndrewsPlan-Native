@@ -1,8 +1,11 @@
+import { Capacitor } from '@capacitor/core';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import { initializeApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
   getAuth,
   onAuthStateChanged,
+  signInWithCredential,
   signInWithPopup,
   type User,
 } from 'firebase/auth';
@@ -45,6 +48,14 @@ for (const scope of SCOPES) {
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
+if (Capacitor.isNativePlatform()) {
+  try {
+    GoogleAuth.initialize();
+  } catch {
+    // Ignore initialization errors if unconfigured on non-supported platforms
+  }
+}
+
 export function initAuth(
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: (user: User | null) => void
@@ -67,13 +78,27 @@ export function initAuth(
 export async function googleSignIn(): Promise<{ user: User; accessToken: string }> {
   isSigningIn = true;
   try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Google sign-in completed, but no Calendar access token was granted.');
+    if (Capacitor.isNativePlatform()) {
+      GoogleAuth.initialize();
+      const googleUser = await GoogleAuth.signIn();
+      const idToken = googleUser.authentication.idToken;
+      const accessToken = googleUser.authentication.accessToken;
+      if (!idToken || !accessToken) {
+        throw new Error('Native Google sign-in completed, but no tokens were granted.');
+      }
+      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+      const result = await signInWithCredential(auth, credential);
+      cachedAccessToken = accessToken;
+      return { user: result.user, accessToken };
+    } else {
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (!credential?.accessToken) {
+        throw new Error('Google sign-in completed, but no Calendar access token was granted.');
+      }
+      cachedAccessToken = credential.accessToken;
+      return { user: result.user, accessToken: cachedAccessToken };
     }
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
   } finally {
     isSigningIn = false;
   }
@@ -89,6 +114,13 @@ export function clearAccessToken(): void {
 
 export async function googleSignOut(): Promise<void> {
   cachedAccessToken = null;
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await GoogleAuth.signOut();
+    } catch {
+      // Ignore native sign out errors
+    }
+  }
   await auth.signOut();
 }
 

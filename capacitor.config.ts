@@ -12,6 +12,14 @@ const config: CapacitorConfig = {
       overlaysWebView: true,
       style: 'DEFAULT',
     },
+    CapacitorHttp: {
+      enabled: true,
+    },
+    GoogleAuth: {
+      scopes: ['profile', 'email', 'https://www.googleapis.com/auth/calendar'],
+      serverClientId: '610375690199-ekcg7lg3p4tgmg3vh5okkcnvn4s3tr41.apps.googleusercontent.com',
+      forceCodeForRefreshToken: true,
+    },
   },
 };
 

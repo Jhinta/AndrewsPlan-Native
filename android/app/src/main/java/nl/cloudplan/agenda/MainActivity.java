@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(CarScheduleBridgePlugin.class);
+        registerPlugin(com.codetrixstudio.capacitor.GoogleAuth.GoogleAuth.class);
         super.onCreate(savedInstanceState);
         if (this.bridge != null) {
             this.bridge.setWebViewClient(new BridgeWebViewClient(this.bridge) {

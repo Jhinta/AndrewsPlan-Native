@@ -4,4 +4,5 @@
     <string name="title_activity_main">AndrewsPlan</string>
     <string name="package_name">nl.cloudplan.agenda</string>
     <string name="custom_url_scheme">nl.cloudplan.agenda</string>
+    <string name="server_client_id">610375690199-ekcg7lg3p4tgmg3vh5okkcnvn4s3tr41.apps.googleusercontent.com</string>
 </resources>
