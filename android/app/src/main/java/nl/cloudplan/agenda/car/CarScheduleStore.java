@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -31,8 +32,7 @@ public final class CarScheduleStore {
     private static final String KEY_USERNAME = "username";
     private static final String KEY_PASSWORD = "password";
 
-    private static final String SYNC_ENDPOINT =
-        "https://ais-pre-y4ljwiv3ulo6fhqnyuiogp-734811990579.europe-west1.run.app/api/ics/sync";
+    private static final String CLOUDPLAN_ICS_URL = "https://cloudplan.nl/ics";
 
     private static final Pattern PHONE_CANDIDATE_PATTERN =
         Pattern.compile("(?<![A-Za-z0-9])(?:\\+|00)?(?:\\(?\\d{1,4}\\)?[\\s.-]?){2,6}\\d{2,6}(?![A-Za-z0-9])");
@@ -203,6 +203,24 @@ public final class CarScheduleStore {
         return Collections.unmodifiableList(result);
     }
 
+    private static String parseIcsDateToIso(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty()) return "";
+        String clean = dateStr.replaceAll("[^0-9TZ]", "");
+        if (clean.length() == 8) {
+            return clean.substring(0, 4) + "-" + clean.substring(4, 6) + "-" + clean.substring(6, 8) + "T00:00:00.000Z";
+        }
+        if (clean.length() >= 15) {
+            String y = clean.substring(0, 4);
+            String m = clean.substring(4, 6);
+            String d = clean.substring(6, 8);
+            String hh = clean.substring(9, 11);
+            String mm = clean.substring(11, 13);
+            String ss = clean.substring(13, 15);
+            return y + "-" + m + "-" + d + "T" + hh + ":" + mm + ":" + ss + (clean.endsWith("Z") ? "Z" : "");
+        }
+        return dateStr;
+    }
+
     public static void fetchLiveSync(Context context, SyncCallback callback) {
         final Context appContext = context.getApplicationContext();
         SharedPreferences prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -221,25 +239,28 @@ public final class CarScheduleStore {
         SYNC_EXECUTOR.execute(() -> {
             HttpURLConnection conn = null;
             try {
-                URL url = new URL(SYNC_ENDPOINT);
+                URL url = new URL(CLOUDPLAN_ICS_URL);
                 conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("POST");
+                conn.setRequestMethod("GET");
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(15000);
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Accept", "application/json");
-
-                JSONObject reqBody = new JSONObject();
-                reqBody.put("username", username);
-                reqBody.put("password", password);
-                byte[] bytes = reqBody.toString().getBytes(StandardCharsets.UTF_8);
-
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(bytes);
-                }
+                String auth = android.util.Base64.encodeToString(
+                    (username + ":" + password).getBytes(StandardCharsets.UTF_8),
+                    android.util.Base64.NO_WRAP
+                );
+                conn.setRequestProperty("Authorization", "Basic " + auth);
+                conn.setRequestProperty("Accept", "text/calendar, text/plain;q=0.9, */*;q=0.8");
+                conn.setRequestProperty("User-Agent", "AndrewsPlan/1.0");
 
                 int status = conn.getResponseCode();
+                if (status == 401 || status == 403) {
+                    MAIN_HANDLER.post(() -> {
+                        if (callback != null) {
+                            callback.onComplete(false, "Authentication failed. Sign in on phone.");
+                        }
+                    });
+                    return;
+                }
                 if (status < 200 || status >= 300) {
                     MAIN_HANDLER.post(() -> {
                         if (callback != null) {
@@ -249,37 +270,90 @@ public final class CarScheduleStore {
                     return;
                 }
 
-                StringBuilder responseBuilder = new StringBuilder();
+                String calendarName = "AndrewsPlan";
+                JSONArray eventsArray = new JSONArray();
+                long cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L;
+
                 try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)
                 )) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        responseBuilder.append(line);
+                    String rawLine;
+                    String currentLine = null;
+                    boolean inVEvent = false;
+                    String uid = "";
+                    String summary = "";
+                    String description = "";
+                    String location = "";
+                    String startIso = "";
+                    String endIso = "";
+                    boolean allDay = false;
+                    String organizer = "";
+
+                    while ((rawLine = reader.readLine()) != null) {
+                        if (rawLine.startsWith(" ") || rawLine.startsWith("\t")) {
+                            if (currentLine != null) {
+                                currentLine += rawLine.substring(1);
+                            }
+                            continue;
+                        }
+                        if (currentLine != null) {
+                            int colon = currentLine.indexOf(':');
+                            if (colon > 0) {
+                                String propHeader = currentLine.substring(0, colon).trim();
+                                String val = currentLine.substring(colon + 1).trim();
+                                int semi = propHeader.indexOf(';');
+                                String prop = (semi > 0 ? propHeader.substring(0, semi) : propHeader).toUpperCase();
+                                String params = semi > 0 ? propHeader.substring(semi + 1).toUpperCase() : "";
+
+                                if (prop.equals("X-WR-CALNAME") || prop.equals("WR-CALNAME")) {
+                                    calendarName = val.replace("\\,", ",").replace("\\;", ";").trim();
+                                } else if (prop.equals("BEGIN") && val.equalsIgnoreCase("VEVENT")) {
+                                    inVEvent = true;
+                                    uid = ""; summary = ""; description = ""; location = "";
+                                    startIso = ""; endIso = ""; allDay = false; organizer = "";
+                                } else if (prop.equals("END") && val.equalsIgnoreCase("VEVENT")) {
+                                    if (inVEvent && !startIso.isEmpty()) {
+                                        long startMs = CarEvent.parseIsoMillis(startIso);
+                                        long endMs = !endIso.isEmpty() ? CarEvent.parseIsoMillis(endIso) : (startMs + 3600000L);
+                                        if (endMs >= cutoff && eventsArray.length() < 150) {
+                                            JSONObject evObj = new JSONObject();
+                                            evObj.put("id", (uid.isEmpty() ? "ev-" + eventsArray.length() : uid) + "::" + startIso);
+                                            evObj.put("summary", summary.isEmpty() ? "Untitled Event" : summary);
+                                            evObj.put("description", description);
+                                            evObj.put("location", location);
+                                            evObj.put("start", startIso);
+                                            evObj.put("end", endIso.isEmpty() ? startIso : endIso);
+                                            evObj.put("allDay", allDay);
+                                            evObj.put("calendarTitle", calendarName);
+                                            evObj.put("organizer", organizer);
+                                            eventsArray.put(evObj);
+                                        }
+                                    }
+                                    inVEvent = false;
+                                } else if (inVEvent) {
+                                    if (prop.equals("UID")) uid = val.replace("\\,", ",").replace("\\;", ";").trim();
+                                    else if (prop.equals("SUMMARY")) summary = val.replace("\\,", ",").replace("\\;", ";").replace("\\n", "\n").replace("\\N", "\n").trim();
+                                    else if (prop.equals("DESCRIPTION")) description = val.replace("\\,", ",").replace("\\;", ";").replace("\\n", "\n").replace("\\N", "\n").trim();
+                                    else if (prop.equals("LOCATION")) location = val.replace("\\,", ",").replace("\\;", ";").replace("\\n", "\n").replace("\\N", "\n").trim();
+                                    else if (prop.equals("DTSTART")) {
+                                        allDay = params.contains("VALUE=DATE");
+                                        startIso = parseIcsDateToIso(val);
+                                    } else if (prop.equals("DTEND")) {
+                                        endIso = parseIcsDateToIso(val);
+                                    } else if (prop.equals("ORGANIZER")) {
+                                        organizer = val.replace("mailto:", "").trim();
+                                    }
+                                }
+                            }
+                        }
+                        currentLine = rawLine;
                     }
                 }
 
-                JSONObject payload = new JSONObject(responseBuilder.toString());
-                String calendarName = payload.optString("calendarName", "AndrewsPlan");
-                String syncedAt = payload.optString("syncedAt", "");
-                JSONArray events = payload.optJSONArray("events");
-                if (events == null) events = new JSONArray();
-
-                long cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L;
-                JSONArray filtered = new JSONArray();
-                for (int i = 0; i < events.length() && filtered.length() < 150; i++) {
-                    JSONObject ev = events.optJSONObject(i);
-                    if (ev == null) continue;
-                    long endMs = CarEvent.parseIsoMillis(ev.optString("end", ""));
-                    if (endMs <= 0) {
-                        endMs = CarEvent.parseIsoMillis(ev.optString("start", "")) + 3600000L;
-                    }
-                    if (endMs >= cutoff) {
-                        filtered.put(ev);
-                    }
-                }
-
-                String filteredJson = filtered.toString();
+                String filteredJson = eventsArray.toString();
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US);
+                sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                String syncedAt = sdf.format(new Date());
                 prefs.edit()
                     .putString(KEY_EVENTS_JSON, filteredJson)
                     .putString(KEY_CALENDAR_NAME, calendarName)

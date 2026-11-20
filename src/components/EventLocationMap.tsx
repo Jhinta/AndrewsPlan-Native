@@ -28,7 +28,6 @@ interface GeocodedPoint {
 
 type GoogleMapViewType = 'satellite' | 'hybrid' | 'roadmap';
 
-const HOSTED_API_BASE = 'https://ais-pre-y4ljwiv3ulo6fhqnyuiogp-734811990579.europe-west1.run.app';
 const SESSION_GEOCODE_CACHE: Record<string, GeocodedPoint> = {};
 let cachedRuntimeApiKey: string | null = null;
 
@@ -36,10 +35,6 @@ function resolveApiUrl(path: string): string {
   const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
   if (configured) {
     return `${configured.replace(/\/$/, '')}${path}`;
-  }
-  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  if (cap?.isNativePlatform?.()) {
-    return `${HOSTED_API_BASE}${path}`;
   }
   return path;
 }

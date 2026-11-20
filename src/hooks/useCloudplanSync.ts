@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import type { CalendarEvent, StoredCredentials, SyncResponse } from '../types/calendar';
 import {
   clearPersistedIcsCache,
@@ -7,6 +8,7 @@ import {
   savePersistedIcsCache,
   type CachedIcsSnapshot,
 } from '../utils/icsCache';
+import { parseIcsCalendar } from '../utils/icsParser';
 
 export const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 export const SYNC_INTERVAL_MINUTES = 15;
@@ -25,17 +27,12 @@ export interface SyncDiffSummary {
 
 const CREDENTIALS_KEY = 'cloudplan_credentials_v1';
 const NEXT_SYNC_KEY = 'cloudplan_next_sync_at_v1';
-const HOSTED_API_BASE = 'https://ais-pre-y4ljwiv3ulo6fhqnyuiogp-734811990579.europe-west1.run.app';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function getSyncApiUrl(): string {
   const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
   if (configured) {
     return `${configured.replace(/\/$/, '')}/api/ics/sync`;
-  }
-  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  if (cap?.isNativePlatform?.()) {
-    return `${HOSTED_API_BASE}/api/ics/sync`;
   }
   return '/api/ics/sync';
 }
@@ -117,6 +114,119 @@ function diffScheduleEvents(
   return { added, removed };
 }
 
+/**
+ * Robust calendar sync fetcher:
+ * 1. On Android/Capacitor native: fetches directly from https://cloudplan.nl/ics via CapacitorHttp (no CORS, no proxy).
+ * 2. In browser/local dev: tries /api/ics/sync proxy or direct fetch.
+ * 3. Parses ICS content and validates events list before returning.
+ */
+async function fetchCloudplanSchedule(creds: StoredCredentials): Promise<SyncResponse> {
+  const authHeader = `Basic ${btoa(`${creds.username}:${creds.password}`)}`;
+  let lastError: string | null = null;
+
+  // 1. Direct native HTTP request via CapacitorHttp
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const capRes = await CapacitorHttp.get({
+        url: CLOUDPLAN_ICS_URL,
+        headers: {
+          Authorization: authHeader,
+          Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.8',
+          'User-Agent': 'AndrewsPlan/1.0',
+        },
+        connectTimeout: 15000,
+        readTimeout: 15000,
+      });
+
+      if (capRes.status === 401 || capRes.status === 403) {
+        throw new Error('AUTH_FAILED: Authentication failed. Verify your AndrewsPlan username and password.');
+      }
+
+      if (capRes.status === 200 && typeof capRes.data === 'string' && capRes.data.includes('BEGIN:VCALENDAR')) {
+        return parseIcsCalendar(capRes.data, CLOUDPLAN_ICS_URL);
+      }
+      if (capRes.status !== 200) {
+        lastError = `AndrewsPlan returned HTTP ${capRes.status}.`;
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('AUTH_FAILED:')) {
+        throw err;
+      }
+      lastError = err instanceof Error ? err.message : 'Native network error connecting to AndrewsPlan.';
+    }
+  }
+
+  // 2. Try proxy endpoint (used during local development)
+  try {
+    const apiUrl = getSyncApiUrl();
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: creds.username,
+        password: creds.password,
+      }),
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('AUTH_FAILED: Authentication failed. Verify your AndrewsPlan username and password.');
+    }
+
+    const text = await res.text();
+    if (text.includes('BEGIN:VCALENDAR')) {
+      return parseIcsCalendar(text, CLOUDPLAN_ICS_URL);
+    }
+
+    if (res.ok) {
+      try {
+        const payload = JSON.parse(text);
+        if (Array.isArray(payload.events)) {
+          return {
+            calendarName: payload.calendarName || 'AndrewsPlan Schedule',
+            sourceUrl: CLOUDPLAN_ICS_URL,
+            syncedAt: payload.syncedAt || new Date().toISOString(),
+            eventCount: typeof payload.eventCount === 'number' ? payload.eventCount : payload.events.length,
+            events: payload.events,
+          };
+        }
+      } catch {
+        // Not valid JSON (e.g. HTML preview response)
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('AUTH_FAILED:')) {
+      throw err;
+    }
+    lastError = err instanceof Error ? err.message : 'Proxy connection error.';
+  }
+
+  // 3. Fallback: direct browser fetch with Basic auth
+  try {
+    const directRes = await fetch(CLOUDPLAN_ICS_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: authHeader,
+        Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.8',
+      },
+    });
+
+    if (directRes.status === 401 || directRes.status === 403) {
+      throw new Error('AUTH_FAILED: Authentication failed. Verify your AndrewsPlan username and password.');
+    }
+
+    const icsText = await directRes.text();
+    if (icsText.includes('BEGIN:VCALENDAR')) {
+      return parseIcsCalendar(icsText, CLOUDPLAN_ICS_URL);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('AUTH_FAILED:')) {
+      throw err;
+    }
+  }
+
+  throw new Error(lastError || 'Unable to sync or parse schedule from AndrewsPlan. Please verify network connectivity.');
+}
+
 export function useCloudplanSync() {
   const initialCredentialsRef = useRef<StoredCredentials | null | undefined>(undefined);
   if (initialCredentialsRef.current === undefined) {
@@ -185,35 +295,7 @@ export function useCloudplanSync() {
       setAuthError(null);
 
       try {
-        const res = await fetch(getSyncApiUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: credsToUse.username,
-            password: credsToUse.password,
-          }),
-        });
-
-        const payload = (await res.json().catch(() => ({}))) as Partial<SyncResponse> & { error?: string };
-
-        if (!res.ok) {
-          const message = payload.error || `Sync failed (HTTP ${res.status}).`;
-          if (res.status === 401 || res.status === 403) {
-            setAuthError(message);
-          } else {
-            setError(message);
-          }
-          scheduleNextSync();
-          return { ok: false, error: message };
-        }
-
-        const normalized: SyncResponse = {
-          calendarName: payload.calendarName || 'AndrewsPlan Schedule',
-          sourceUrl: CLOUDPLAN_ICS_URL,
-          syncedAt: payload.syncedAt || new Date().toISOString(),
-          eventCount: typeof payload.eventCount === 'number' ? payload.eventCount : (payload.events?.length ?? 0),
-          events: Array.isArray(payload.events) ? payload.events : [],
-        };
+        const normalized = await fetchCloudplanSchedule(credsToUse);
 
         const previous = scheduleRef.current;
         const { added, removed } = previous
@@ -221,7 +303,7 @@ export function useCloudplanSync() {
           : { added: normalized.events.length, removed: 0 };
 
         setSchedule(normalized);
-        void savePersistedIcsCache(normalized, credsToUse.username);
+        await savePersistedIcsCache(normalized, credsToUse.username);
         scheduleNextSync();
 
         const shouldShowPopup =
@@ -241,11 +323,18 @@ export function useCloudplanSync() {
         }
 
         return { ok: true };
-      } catch {
-        const message = 'Network error while syncing with AndrewsPlan. Showing cached events if available.';
-        setError(message);
+      } catch (err) {
+        const rawMsg = err instanceof Error ? err.message : 'Unable to sync with AndrewsPlan.';
+        const isAuth = rawMsg.startsWith('AUTH_FAILED:');
+        const cleanMsg = isAuth ? rawMsg.replace('AUTH_FAILED:', '').trim() : rawMsg;
+
+        if (isAuth) {
+          setAuthError(cleanMsg);
+        } else {
+          setError(cleanMsg);
+        }
         scheduleNextSync();
-        return { ok: false, error: message };
+        return { ok: false, error: cleanMsg };
       } finally {
         isSyncingRef.current = false;
         setIsSyncing(false);

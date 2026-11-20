@@ -220,7 +220,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 active:scale-[0.99] transition-all disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
               >
                 <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>{isSyncing ? 'Fetching schedule…' : 'Connect & Sync Schedule'}</span>
+                <span>{isSyncing ? 'Connecting & parsing schedule…' : 'Connect & Sync Schedule'}</span>
               </button>
             </form>
 

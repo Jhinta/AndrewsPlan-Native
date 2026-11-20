@@ -744,6 +744,8 @@ export default function App() {
     : activeCalendar?.summary || 'Google Calendar';
   const totalEventCount = combinedEvents.length;
   const isBusySync = isSyncing || isGoogleLoading;
+  const isScheduleParsing = isCloudplanAuthenticated && schedule === null;
+  const isLoadingSchedule = isBusySync || isScheduleParsing;
   const canWriteSelectedCalendar =
     activeCalendar?.accessRole === 'owner' || activeCalendar?.accessRole === 'writer';
 
@@ -1583,9 +1585,13 @@ export default function App() {
               )}
 
               {/* Loading Skeleton */}
-              {isBusySync &&
+              {isLoadingSchedule &&
                 (isMonthlyAgendaView ? monthlyCalendarEvents.length === 0 : dayGroups.length === 0) && (
                 <div className="space-y-4">
+                  <div className="flex items-center gap-2 px-1 text-xs font-medium text-blue-700 dark:text-blue-400 animate-pulse">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    <span>Syncing & parsing schedule events…</span>
+                  </div>
                   {[1, 2, 3].map((group) => (
                     <div
                       key={group}
@@ -1601,7 +1607,7 @@ export default function App() {
 
               {/* Monthly View on Agenda Menu */}
               {isMonthlyAgendaView &&
-                !(isBusySync && monthlyCalendarEvents.length === 0) && (
+                !(isLoadingSchedule && monthlyCalendarEvents.length === 0) && (
                   <MonthlyCalendarView
                     events={monthlyCalendarEvents}
                     nowMs={nowMs}
@@ -1619,7 +1625,7 @@ export default function App() {
                 )}
 
               {/* Empty State (Today / All Events list views) */}
-              {!isMonthlyAgendaView && !isBusySync && dayGroups.length === 0 && (
+              {!isMonthlyAgendaView && !isLoadingSchedule && dayGroups.length === 0 && (
                 <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-8 sm:p-12 text-center space-y-3">
                   <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center mx-auto">
                     <Calendar className="w-6 h-6" />
@@ -1646,6 +1652,18 @@ export default function App() {
                         Clear search
                       </button>
                     )}
+                    {filter === 'today' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilter('upcoming');
+                          setMobileTab('agenda');
+                        }}
+                        className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-700 text-sm font-semibold text-white hover:bg-blue-800"
+                      >
+                        View upcoming agenda
+                      </button>
+                    )}
                     {filter !== 'all' && (
                       <button
                         type="button"
@@ -1658,8 +1676,8 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => void handleCombinedSync()}
-                      disabled={isBusySync}
-                      className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-700 text-sm font-semibold text-white hover:bg-blue-800"
+                      disabled={isLoadingSchedule}
+                      className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
                     >
                       Sync now
                     </button>

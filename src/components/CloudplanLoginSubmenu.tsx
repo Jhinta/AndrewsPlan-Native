@@ -151,7 +151,7 @@ export const CloudplanLoginSubmenu: React.FC<CloudplanLoginSubmenuProps> = ({
             className="w-full min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 active:scale-[0.99] transition-all disabled:opacity-60 disabled:pointer-events-none"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Connecting…' : 'Connect & Sync AndrewsPlan'}</span>
+            <span>{isSyncing ? 'Connecting & parsing…' : 'Connect & Sync AndrewsPlan'}</span>
           </button>
         </form>
       )}
