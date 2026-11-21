@@ -97,6 +97,18 @@ export const OfflineBanner: React.FC = () => {
   const isOnline = useOnlineStatus();
   if (isOnline) return null;
 
+  try {
+    const raw = localStorage.getItem('cloudplan_credentials_v1');
+    if (raw) {
+      const parsed = JSON.parse(raw) as { username?: string };
+      if (parsed?.username && typeof parsed.username === 'string' && parsed.username.trim().toLowerCase() === 'demo') {
+        return null;
+      }
+    }
+  } catch {
+    // Ignore storage errors
+  }
+
   return (
     <div
       role="status"

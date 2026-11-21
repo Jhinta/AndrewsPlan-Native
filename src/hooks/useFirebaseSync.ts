@@ -37,25 +37,27 @@ export function useFirebaseSync(
     return unsub;
   }, []);
 
-  // Only attach Firestore onSnapshot listeners when authenticated
+  const isDemo = Boolean(cloudplanUsername && cloudplanUsername.trim().toLowerCase() === 'demo');
+
+  // Only attach Firestore onSnapshot listeners when authenticated and not demo
   useEffect(() => {
-    if (!authReady || !firebaseUser) return;
+    if (!authReady || !firebaseUser || isDemo) return;
 
     const unsub = subscribeToFirestoreSchedule(
       firebaseUser.uid,
       (profile) => setCloudProfile(profile),
       (events) => setCloudEvents(events),
       (err) => {
-        setCloudError(err.message);
+        console.warn('Firestore subscription warning:', err);
       }
     );
 
     return unsub;
-  }, [authReady, firebaseUser]);
+  }, [authReady, firebaseUser, isDemo]);
 
-  // Automatically persist newly synced Cloudplan schedules to Firestore
+  // Automatically persist newly synced Cloudplan schedules to Firestore (skip for demo user)
   useEffect(() => {
-    if (!authReady || !firebaseUser || !localSchedule || !cloudplanUsername) return;
+    if (!authReady || !firebaseUser || !localSchedule || !cloudplanUsername || isDemo) return;
     if (lastPushedSyncedAtRef.current === localSchedule.syncedAt) return;
 
     let cancelled = false;
@@ -67,7 +69,7 @@ export function useFirebaseSync(
       .catch((err) => {
         if (!cancelled) {
           lastPushedSyncedAtRef.current = null;
-          setCloudError(err instanceof Error ? err.message : 'Failed to sync schedule to Firestore.');
+          console.warn('Firestore sync warning:', err);
         }
       })
       .finally(() => {
