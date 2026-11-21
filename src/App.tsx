@@ -391,7 +391,8 @@ export default function App() {
       }
 
       if (query) {
-        const haystack = `${ev.summary} ${ev.location} ${ev.description} ${ev.organizer} ${ev.calendarTitle ?? ''} ${ev.categories.join(' ')}`.toLowerCase();
+        const cats = Array.isArray(ev.categories) ? ev.categories.join(' ') : '';
+        const haystack = `${ev.summary ?? ''} ${ev.location ?? ''} ${ev.description ?? ''} ${ev.organizer ?? ''} ${ev.calendarTitle ?? ''} ${cats}`.toLowerCase();
         if (!haystack.includes(query)) return false;
       }
 

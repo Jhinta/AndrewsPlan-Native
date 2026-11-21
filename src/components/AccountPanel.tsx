@@ -119,6 +119,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
   onCloudplanSignIn,
   onSignOut,
 }) => {
+  const isDemoUser = username.trim().toLowerCase() === 'demo';
   const activeCalendar = calendars.find((c) => c.id === selectedCalendarId);
   const canWriteSelectedCalendar =
     activeCalendar?.accessRole === 'owner' || activeCalendar?.accessRole === 'writer';
@@ -171,27 +172,28 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
         </button>
       </section>
 
-      {/* Google Calendar Integration */}
-      <section className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Google Calendar
-            </h2>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              {!needsGoogleAuth && firebaseUser
-                ? `${firebaseUser.email || firebaseUser.displayName || 'Connected'} · ${googleEventsCount} events`
-                : firebaseUser
-                ? 'Session needs fresh Google authorization to access Calendar'
-                : 'Connect Google Calendar to view, add, or export AndrewsPlan events'}
-            </p>
+      {/* Google Calendar Integration (Hidden for Demo account) */}
+      {!isDemoUser && (
+        <section className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                Google Calendar
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {!needsGoogleAuth && firebaseUser
+                  ? `${firebaseUser.email || firebaseUser.displayName || 'Connected'} · ${googleEventsCount} events`
+                  : firebaseUser
+                  ? 'Session needs fresh Google authorization to access Calendar'
+                  : 'Connect Google Calendar to view, add, or export AndrewsPlan events'}
+              </p>
+            </div>
+            <Calendar className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
           </div>
-          <Calendar className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-        </div>
 
-        {googleError && (
-          <p className="text-xs text-red-600 dark:text-red-400 break-words">{googleError}</p>
-        )}
+          {googleError && (
+            <p className="text-xs text-red-600 dark:text-red-400 break-words">{googleError}</p>
+          )}
 
         {needsGoogleAuth ? (
           <GoogleSignInButton
@@ -270,6 +272,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           </div>
         )}
       </section>
+      )}
 
       {/* AndrewsPlan Connection Details or Login Submenu (only when Google Sign-In is active) */}
       {isCloudplanConnected ? (

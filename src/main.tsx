@@ -17,7 +17,9 @@ console.error = (...args: unknown[]) => {
   }
 };
 
-if (import.meta.env.PROD) {
+import { Capacitor } from '@capacitor/core';
+
+if (import.meta.env.PROD && !Capacitor.isNativePlatform()) {
   const hadController =
     typeof navigator !== 'undefined' &&
     'serviceWorker' in navigator &&

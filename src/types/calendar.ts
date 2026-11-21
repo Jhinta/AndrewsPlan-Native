@@ -19,6 +19,8 @@ export interface CalendarEvent {
   calendarTitle?: string;
   googleEventId?: string;
   canEdit?: boolean;
+  phoneDisplay?: string;
+  phoneHref?: string;
 }
 
 export interface GoogleCalendarInfo {

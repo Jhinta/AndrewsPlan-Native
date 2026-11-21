@@ -11,11 +11,14 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -95,7 +98,32 @@ public final class CarScheduleStore {
         SYNC_EXECUTOR.execute(() -> {
             try {
                 SharedPreferences prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                String username = prefs.getString(KEY_USERNAME, "");
+                String password = prefs.getString(KEY_PASSWORD, "");
                 String raw = prefs.getString(KEY_EVENTS_JSON, "[]");
+
+                // Auto-seed demo account & 1 week of fake events if unconfigured
+                if ((username.isEmpty() && password.isEmpty()) || "demo".equalsIgnoreCase(username)) {
+                    if (username.isEmpty()) {
+                        username = "demo";
+                        password = "demo";
+                    }
+                    if ("[]".equals(raw.trim()) || raw.trim().isEmpty() || "demo".equalsIgnoreCase(username)) {
+                        raw = generateDemoEventsJson(System.currentTimeMillis());
+                        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US);
+                        sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                        String syncedAt = sdf.format(new Date());
+
+                        prefs.edit()
+                            .putString(KEY_USERNAME, username)
+                            .putString(KEY_PASSWORD, password)
+                            .putString(KEY_CALENDAR_NAME, "AndrewsPlan Demo")
+                            .putString(KEY_EVENTS_JSON, raw)
+                            .putString(KEY_SYNCED_AT, syncedAt)
+                            .apply();
+                    }
+                }
+
                 List<CarEvent> parsed = parseEventsJson(raw);
                 synchronized (CACHE_LOCK) {
                     if (!cacheInitialized) {
@@ -125,14 +153,26 @@ public final class CarScheduleStore {
         String username,
         String password
     ) {
+        String safeUsername = username != null ? username.trim() : "";
+        String safePassword = password != null ? password.trim() : "";
         String safeJson = eventsJson != null ? eventsJson : "[]";
+
+        if ("demo".equalsIgnoreCase(safeUsername) && "demo".equalsIgnoreCase(safePassword)) {
+            if ("[]".equals(safeJson.trim()) || safeJson.trim().isEmpty()) {
+                safeJson = generateDemoEventsJson(System.currentTimeMillis());
+            }
+            if (calendarName == null || calendarName.isEmpty() || "AndrewsPlan".equals(calendarName)) {
+                calendarName = "AndrewsPlan Demo";
+            }
+        }
+
         SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit()
             .putString(KEY_EVENTS_JSON, safeJson)
             .putString(KEY_CALENDAR_NAME, calendarName != null && !calendarName.isEmpty() ? calendarName : "AndrewsPlan")
             .putString(KEY_SYNCED_AT, syncedAt != null ? syncedAt : "")
-            .putString(KEY_USERNAME, username != null ? username : "")
-            .putString(KEY_PASSWORD, password != null ? password : "")
+            .putString(KEY_USERNAME, safeUsername)
+            .putString(KEY_PASSWORD, safePassword)
             .apply();
         List<CarEvent> parsed = parseEventsJson(safeJson);
         synchronized (CACHE_LOCK) {
@@ -232,6 +272,38 @@ public final class CarScheduleStore {
                 if (callback != null) {
                     callback.onComplete(false, "Sign in on phone to sync");
                 }
+            });
+            return;
+        }
+
+        // Demo account live sync handler (generates fresh 1-week events)
+        if ("demo".equalsIgnoreCase(username) && "demo".equalsIgnoreCase(password)) {
+            SYNC_EXECUTOR.execute(() -> {
+                long nowMs = System.currentTimeMillis();
+                String demoEventsJson = generateDemoEventsJson(nowMs);
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US);
+                sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                String syncedAt = sdf.format(new Date(nowMs));
+
+                prefs.edit()
+                    .putString(KEY_EVENTS_JSON, demoEventsJson)
+                    .putString(KEY_CALENDAR_NAME, "AndrewsPlan Demo")
+                    .putString(KEY_SYNCED_AT, syncedAt)
+                    .apply();
+
+                List<CarEvent> parsed = parseEventsJson(demoEventsJson);
+                synchronized (CACHE_LOCK) {
+                    cachedEvents = parsed;
+                    cacheInitialized = true;
+                    cacheLoading = false;
+                }
+
+                notifyListeners();
+                MAIN_HANDLER.post(() -> {
+                    if (callback != null) {
+                        callback.onComplete(true, "Demo schedule synced");
+                    }
+                });
             });
             return;
         }
@@ -449,5 +521,232 @@ public final class CarScheduleStore {
             }
         }
         return null;
+    }
+
+    public static String generateDemoEventsJson(long nowMs) {
+        JSONArray array = new JSONArray();
+        try {
+            Calendar cal = Calendar.getInstance();
+            cal.setTimeInMillis(nowMs);
+            cal.set(Calendar.HOUR_OF_DAY, 0);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            long todayStart = cal.getTimeInMillis();
+
+            java.text.SimpleDateFormat isoFmt = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+            isoFmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+
+            // Day 0 (Today)
+            array.put(createEventObj(
+                "demo-ev-1",
+                "Morning Sync & Planning",
+                "Review weekly agenda, sprint backlog, and Android Auto integration progress.",
+                "CloudPlan HQ, Keizersgracht 123, Amsterdam",
+                isoFmt.format(new Date(todayStart + 9 * 3600000L)),
+                isoFmt.format(new Date(todayStart + 9 * 3600000L + 45 * 60000L)),
+                false,
+                "AndrewsPlan Demo",
+                "demo@cloudplan.nl",
+                "+31 20 123 4567",
+                "tel:+31201234567"
+            ));
+
+            array.put(createEventObj(
+                "demo-ev-2",
+                "Client Lunch Meeting",
+                "Discuss project milestones, deliverables, and Q3 extension over lunch.",
+                "Grand Café De Jaren, Doelenstraat 20, Amsterdam",
+                isoFmt.format(new Date(todayStart + 12 * 3600000L + 30 * 60000L)),
+                isoFmt.format(new Date(todayStart + 13 * 3600000L + 30 * 60000L)),
+                false,
+                "AndrewsPlan Demo",
+                "client@company.com",
+                "+31 20 625 5771",
+                "tel:+31206255771"
+            ));
+
+            array.put(createEventObj(
+                "demo-ev-3",
+                "Android Auto Live Demo",
+                "Showcase native Android Auto POI templates and voice controls to stakeholders.",
+                "https://meet.google.com/abc-demo-xyz",
+                isoFmt.format(new Date(todayStart + 15 * 3600000L)),
+                isoFmt.format(new Date(todayStart + 16 * 3600000L)),
+                false,
+                "AndrewsPlan Demo",
+                "product@cloudplan.nl",
+                "",
+                ""
+            ));
+
+            // Day 1 (Tomorrow)
+            long day1 = todayStart + 24 * 3600000L;
+            array.put(createEventObj(
+                "demo-ev-4",
+                "On-site Technical Workshop",
+                "Interactive session on mobile architecture and car app design standards.",
+                "High Tech Campus 1, Eindhoven",
+                isoFmt.format(new Date(day1 + 10 * 3600000L)),
+                isoFmt.format(new Date(day1 + 12 * 3600000L)),
+                false,
+                "AndrewsPlan Demo",
+                "workshop@hightechcampus.com",
+                "+31 40 274 6000",
+                "tel:+31402746000"
+            ));
+
+            array.put(createEventObj(
+                "demo-ev-5",
+                "Team Strategy Dinner",
+                "Quarterly team dinner and celebration for successful mobile release.",
+                "Baden Powelllaan 2, Rotterdam",
+                isoFmt.format(new Date(day1 + 18 * 3600000L + 30 * 60000L)),
+                isoFmt.format(new Date(day1 + 20 * 3600000L + 30 * 60000L)),
+                false,
+                "AndrewsPlan Demo",
+                "events@cloudplan.nl",
+                "+31 10 436 0530",
+                "tel:+31104360530"
+            ));
+
+            // Day 2
+            long day2 = todayStart + 2 * 24 * 3600000L;
+            array.put(createEventObj(
+                "demo-ev-6",
+                "Architecture Review",
+                "Evaluate database sync performance and background worker lifecycle.",
+                "https://teams.microsoft.com/l/meetup-join/demo",
+                isoFmt.format(new Date(day2 + 11 * 3600000L)),
+                isoFmt.format(new Date(day2 + 12 * 3600000L)),
+                false,
+                "AndrewsPlan Demo",
+                "tech-lead@cloudplan.nl",
+                "",
+                ""
+            ));
+
+            array.put(createEventObj(
+                "demo-ev-7",
+                "Customer Support Catch-up",
+                "Review feedback from Android Auto users and prioritize bug fixes.",
+                "Phone Call",
+                isoFmt.format(new Date(day2 + 14 * 3600000L + 30 * 60000L)),
+                isoFmt.format(new Date(day2 + 15 * 3600000L + 15 * 60000L)),
+                false,
+                "AndrewsPlan Demo",
+                "support@cloudplan.nl",
+                "+31 30 987 6543",
+                "tel:+31309876543"
+            ));
+
+            // Day 3
+            long day3 = todayStart + 3 * 24 * 3600000L;
+            array.put(createEventObj(
+                "demo-ev-8",
+                "Mobile UX Design Sprint",
+                "Design sprint focused on car screen ergonomics and high-contrast night mode.",
+                "Stationsplein 45, Utrecht",
+                isoFmt.format(new Date(day3 + 9 * 3600000L + 30 * 60000L)),
+                isoFmt.format(new Date(day3 + 11 * 3600000L + 30 * 60000L)),
+                false,
+                "AndrewsPlan Demo",
+                "ux@cloudplan.nl",
+                "+31 30 231 1122",
+                "tel:+31302311122"
+            ));
+
+            array.put(createEventObj(
+                "demo-ev-9",
+                "Weekly Operations Sync",
+                "Operational review, resource allocation, and timeline check.",
+                "https://zoom.us/j/demo123456",
+                isoFmt.format(new Date(day3 + 16 * 3600000L)),
+                isoFmt.format(new Date(day3 + 17 * 3600000L)),
+                false,
+                "AndrewsPlan Demo",
+                "ops@cloudplan.nl",
+                "",
+                ""
+            ));
+
+            // Day 4
+            long day4 = todayStart + 4 * 24 * 3600000L;
+            array.put(createEventObj(
+                "demo-ev-10",
+                "Security & Compliance Audit",
+                "Annual audit covering credential storage, TLS verification, and host validation.",
+                "Beatrixlaan 800, The Hague",
+                isoFmt.format(new Date(day4 + 13 * 3600000L)),
+                isoFmt.format(new Date(day4 + 14 * 3600000L + 30 * 60000L)),
+                false,
+                "AndrewsPlan Demo",
+                "security@cloudplan.nl",
+                "+31 70 345 6789",
+                "tel:+31703456789"
+            ));
+
+            // Day 5
+            long day5 = todayStart + 5 * 24 * 3600000L;
+            array.put(createEventObj(
+                "demo-ev-11",
+                "Weekend Hackathon & Innovations",
+                "Prototyping AI features and voice shortcuts for driver convenience.",
+                "Science Park 904, Amsterdam",
+                isoFmt.format(new Date(day5 + 11 * 3600000L)),
+                isoFmt.format(new Date(day5 + 17 * 3600000L)),
+                false,
+                "AndrewsPlan Demo",
+                "hackathon@cloudplan.nl",
+                "+31 20 525 9111",
+                "tel:+31205259111"
+            ));
+
+            // Day 6
+            long day6 = todayStart + 6 * 24 * 3600000L;
+            array.put(createEventObj(
+                "demo-ev-12",
+                "Weekly Retrospective & Planning",
+                "Sprint retro, celebrate accomplishments, and plan tasks for the upcoming week.",
+                "CloudPlan HQ, Keizersgracht 123, Amsterdam",
+                isoFmt.format(new Date(day6 + 10 * 3600000L)),
+                isoFmt.format(new Date(day6 + 11 * 3600000L + 30 * 60000L)),
+                false,
+                "AndrewsPlan Demo",
+                "demo@cloudplan.nl",
+                "+31 20 123 4567",
+                "tel:+31201234567"
+            ));
+
+        } catch (Exception ignored) {}
+        return array.toString();
+    }
+
+    private static JSONObject createEventObj(
+        String id,
+        String summary,
+        String description,
+        String location,
+        String startIso,
+        String endIso,
+        boolean allDay,
+        String calendarTitle,
+        String organizer,
+        String phoneDisplay,
+        String phoneHref
+    ) throws Exception {
+        JSONObject obj = new JSONObject();
+        obj.put("id", id);
+        obj.put("summary", summary);
+        obj.put("description", description);
+        obj.put("location", location);
+        obj.put("start", startIso);
+        obj.put("end", endIso);
+        obj.put("allDay", allDay);
+        obj.put("calendarTitle", calendarTitle);
+        obj.put("organizer", organizer);
+        obj.put("phoneDisplay", "0800 5200200");
+        obj.put("phoneHref", "tel:08005200200");
+        return obj;
     }
 }

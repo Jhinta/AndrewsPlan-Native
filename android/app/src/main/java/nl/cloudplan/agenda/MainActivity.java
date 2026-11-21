@@ -16,6 +16,11 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(CarScheduleBridgePlugin.class);
         registerPlugin(com.codetrixstudio.capacitor.GoogleAuth.GoogleAuth.class);
         super.onCreate(savedInstanceState);
+        if (this.bridge != null && this.bridge.getWebView() != null) {
+            try {
+                this.bridge.getWebView().clearCache(true);
+            } catch (Exception ignored) {}
+        }
         if (this.bridge != null) {
             this.bridge.setWebViewClient(new BridgeWebViewClient(this.bridge) {
                 @Override
