@@ -157,6 +157,13 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
 
   const detectedPhones = useMemo(() => {
     if (!event) return [];
+    if (event.phoneDisplay && event.phoneHref) {
+      return [{
+        display: event.phoneDisplay,
+        href: event.phoneHref,
+        normalized: event.phoneDisplay.replace(/\D/g, ''),
+      }];
+    }
     return extractPhoneNumbers([
       event.summary,
       event.location,

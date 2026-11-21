@@ -41,6 +41,7 @@ export async function syncScheduleToAndroidAuto(params: {
   }
 
   const now = new Date();
+  const isDemo = params.credentials?.username?.trim().toLowerCase() === 'demo';
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const serialized: SerializedCarEvent[] = params.events
     .filter((ev) => eventStartsOrContinuesFromToday(ev, startOfToday))
@@ -48,6 +49,8 @@ export async function syncScheduleToAndroidAuto(params: {
     .map((ev) => {
       const primaryPhone = extractPhoneNumbers([ev.summary, ev.location, ev.description])[0];
       const range = getEventEffectiveRange(ev);
+      const phoneDisplay = (isDemo || ev.phoneDisplay) ? (ev.phoneDisplay || '0800 5200200') : (primaryPhone?.display ?? '');
+      const phoneHref = (isDemo || ev.phoneHref) ? (ev.phoneHref || 'tel:08005200200') : (primaryPhone?.href ?? '');
       return {
         id: ev.id,
         summary: ev.summary,
@@ -58,8 +61,8 @@ export async function syncScheduleToAndroidAuto(params: {
         allDay: ev.allDay,
         calendarTitle: ev.calendarTitle || (ev.source === 'google' ? 'Google Calendar' : 'AndrewsPlan'),
         organizer: ev.organizer,
-        phoneDisplay: primaryPhone?.display ?? '',
-        phoneHref: primaryPhone?.href ?? '',
+        phoneDisplay,
+        phoneHref,
       };
     });
 

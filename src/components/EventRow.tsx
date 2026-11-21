@@ -26,9 +26,12 @@ export const EventRow: React.FC<EventRowProps> = ({
   const durationLabel = formatDuration(event.start, event.end, event.allDay);
 
   const primaryPhone = useMemo(() => {
+    if (event.phoneDisplay && event.phoneHref) {
+      return { display: event.phoneDisplay, href: event.phoneHref, normalized: event.phoneDisplay.replace(/\D/g, '') };
+    }
     const found = extractPhoneNumbers([event.summary, event.location, event.description]);
     return found[0] ?? null;
-  }, [event.summary, event.location, event.description]);
+  }, [event.phoneDisplay, event.phoneHref, event.summary, event.location, event.description]);
 
   const navigationUrl = event.location ? getGoogleNavigationUrl(event.location) : null;
 
