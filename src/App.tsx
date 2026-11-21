@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { AccountPanel } from './components/AccountPanel';
+import { ChangelogModal } from './components/ChangelogModal';
 import { CloudplanLoginSubmenu } from './components/CloudplanLoginSubmenu';
 import { ConfirmActionModal } from './components/ConfirmActionModal';
 import { CreateGoogleEventModal } from './components/CreateGoogleEventModal';
@@ -229,6 +230,25 @@ export default function App() {
 
   // Synchronize mobile & tablet status bar: keep full-screen while ensuring icons contrast and UI fits
   useStatusBar(isDark);
+
+  const CURRENT_APP_VERSION = '2.0';
+  const [isChangelogOpen, setIsChangelogOpen] = useState(() => {
+    try {
+      const stored = localStorage.getItem('andrewsplan_installed_version');
+      return stored !== CURRENT_APP_VERSION;
+    } catch {
+      return false;
+    }
+  });
+
+  const handleCloseChangelog = useCallback(() => {
+    setIsChangelogOpen(false);
+    try {
+      localStorage.setItem('andrewsplan_installed_version', CURRENT_APP_VERSION);
+    } catch {
+      // Ignore
+    }
+  }, []);
 
   const handleToggleTheme = () => {
     setIsDark((prev) => {
@@ -1896,6 +1916,13 @@ export default function App() {
         defaultNavApp={defaultNavApp}
         onSaveDefaultNavApp={handleSaveDefaultNavApp}
         onClose={handleCloseNavigationChooser}
+      />
+
+      {/* Changelog Update Modal */}
+      <ChangelogModal
+        isOpen={isChangelogOpen}
+        version={CURRENT_APP_VERSION}
+        onClose={handleCloseChangelog}
       />
     </div>
   );
