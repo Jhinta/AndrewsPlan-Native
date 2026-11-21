@@ -160,16 +160,6 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
             </p>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={onManualSync}
-          disabled={isSyncing || isGoogleLoading}
-          className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-800 active:scale-[0.99] transition-all disabled:opacity-60"
-        >
-          <RefreshCw className={`w-4 h-4 ${isSyncing || isGoogleLoading ? 'animate-spin' : ''}`} />
-          <span>{isSyncing || isGoogleLoading ? 'Syncing…' : 'Sync now'}</span>
-        </button>
       </section>
 
       {/* Google Calendar Integration (Hidden for Demo account) */}
